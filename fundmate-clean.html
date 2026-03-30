@@ -114,8 +114,6 @@
         const SSO_PORTAL_URL = 'https://apps.iwa.web.tr';
         const SSO_VERIFY_URL = 'https://apps.iwa.web.tr/api/auth/verify';
         const APP_CODE = 'fundmate';
-        const HISTORY_KEY = 'fundmate_analysis_history';
-
         let isAdmin = false;
 
         function getToken() {
@@ -181,10 +179,15 @@
         }
 
         function switchTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'border-purple-500', 'text-purple-400'));
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('active', 'border-purple-400', 'text-white', 'bg-white/10');
+                b.classList.add('text-gray-300');
+            });
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
 
-            document.getElementById('btn-' + tab).classList.add('active', 'border-purple-500', 'text-purple-400');
+            const activeBtn = document.getElementById('btn-' + tab);
+            activeBtn.classList.remove('text-gray-300');
+            activeBtn.classList.add('active', 'border-purple-400', 'text-white', 'bg-white/10');
             document.getElementById('tab-' + tab).classList.add('active');
 
             if (tab === 'history') renderHistory();
@@ -195,66 +198,70 @@
             top.location.href = SSO_PORTAL_URL;
         }
 
-        // --- History ---
-        function getHistory() {
+        // --- History (API-backed) ---
+        let historyCache = [];
+
+        async function fetchHistory() {
             try {
-                return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+                const token = localStorage.getItem('sso_access_token');
+                if (!token) return [];
+                const res = await fetch(`${SSO_VERIFY_URL.replace('/auth/verify', '/fundmate/history')}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) return [];
+                const data = await res.json();
+                historyCache = data.data || [];
+                return historyCache;
             } catch { return []; }
         }
 
-        function saveToHistory(entry) {
-            const history = getHistory();
-            history.unshift(entry);
-            // Keep last 200 entries
-            if (history.length > 200) history.length = 200;
-            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-        }
-
-        function clearHistory() {
-            if (!confirm('Tüm analiz geçmişi silinecek. Emin misiniz?')) return;
-            localStorage.removeItem(HISTORY_KEY);
-            renderHistory();
+        async function deleteHistoryEntry(id) {
+            try {
+                const token = localStorage.getItem('sso_access_token');
+                await fetch(`${SSO_VERIFY_URL.replace('/auth/verify', '/fundmate/history')}/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                renderHistory();
+            } catch {}
         }
 
         function exportHistoryExcel() {
-            const history = getHistory();
-            if (history.length === 0) return;
+            if (historyCache.length === 0) return;
 
-            const rows = [['Date', 'Company', 'Country', 'Month', 'Year', 'Currency', 'FBA Sales', 'Order Fees', 'Refund Fees', 'Storage Fees', 'Total Fees', 'Max %', 'Support %', 'Rate', 'Eligible Amount', 'Support Amount', 'Support (TRY)']];
+            const rows = [['Date', 'User', 'Company', 'Country', 'Month', 'Year', 'Currency', 'FBA Sales', 'Order Fees', 'Refund Fees', 'Storage Fees', 'Total Fees', 'Max %', 'Support %', 'Rate', 'Eligible Amount', 'Support Amount', 'Support (TRY)']];
 
-            history.forEach(h => {
+            historyCache.forEach(h => {
                 rows.push([
-                    new Date(h.timestamp).toLocaleString('tr-TR'),
+                    new Date(h.created_at).toLocaleString('tr-TR'),
+                    h.user_name || h.user_email || '-',
                     h.company || '-',
                     h.country,
                     h.month,
                     h.year,
                     h.currency,
-                    h.totalSales || 0,
-                    h.orderFees || 0,
-                    h.refundFees || 0,
-                    h.storageFees || 0,
-                    h.totalFees || 0,
-                    h.maxPct || 0,
-                    h.supportPct || 0,
-                    h.rate || 0,
-                    h.eligibleAmount || 0,
-                    h.supportAmount || 0,
-                    h.supportAmountTRY || 0
+                    Number(h.total_sales) || 0,
+                    Number(h.order_fees) || 0,
+                    Number(h.refund_fees) || 0,
+                    Number(h.storage_fees) || 0,
+                    Number(h.total_fees) || 0,
+                    Number(h.max_pct) || 0,
+                    Number(h.support_pct) || 0,
+                    Number(h.rate) || 0,
+                    Number(h.eligible_amount) || 0,
+                    Number(h.support_amount) || 0,
+                    Number(h.support_amount_try) || 0
                 ]);
             });
 
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(rows);
-
-            // Column widths
             ws['!cols'] = [
-                { wch: 18 }, { wch: 24 }, { wch: 8 }, { wch: 10 }, { wch: 6 },
+                { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 8 }, { wch: 10 }, { wch: 6 },
                 { wch: 6 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
                 { wch: 14 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 14 },
                 { wch: 14 }, { wch: 14 }
             ];
-
             XLSX.utils.book_append_sheet(wb, ws, 'Analysis History');
             XLSX.writeFile(wb, `FundMate_History_${new Date().toISOString().slice(0, 10)}.xlsx`);
         }
@@ -264,27 +271,32 @@
             return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
-        function renderHistory() {
+        async function renderHistory() {
             const container = document.getElementById('history-content');
-            const history = getHistory();
+            container.innerHTML = '<div class="history-empty" style="color: #a78bfa;">Loading...</div>';
+
+            const history = await fetchHistory();
 
             if (history.length === 0) {
                 container.innerHTML = '<div class="history-empty">Henüz analiz geçmişi yok.</div>';
                 return;
             }
 
-            const rows = history.map((h, i) => {
-                const date = new Date(h.timestamp).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const rows = history.map(h => {
+                const date = new Date(h.created_at).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                const cur = h.currency;
                 return `<tr>
                     <td>${date}</td>
+                    <td style="font-size:0.7rem;color:#a1a1aa;">${h.user_name || '-'}</td>
                     <td><strong>${h.company || '-'}</strong></td>
                     <td>${h.country}</td>
                     <td>${h.month} ${h.year}</td>
-                    <td class="num">${h.currency} ${fmtNum(h.totalSales)}</td>
-                    <td class="num">${h.currency} ${fmtNum(h.totalFees)}</td>
-                    <td class="num">${h.currency} ${fmtNum(h.eligibleAmount)}</td>
-                    <td class="num highlight">${h.currency} ${fmtNum(h.supportAmount)}</td>
-                    <td class="num highlight">₺ ${fmtNum(h.supportAmountTRY)}</td>
+                    <td class="num">${cur} ${fmtNum(h.total_sales)}</td>
+                    <td class="num">${cur} ${fmtNum(h.total_fees)}</td>
+                    <td class="num">${cur} ${fmtNum(h.eligible_amount)}</td>
+                    <td class="num highlight">${cur} ${fmtNum(h.support_amount)}</td>
+                    <td class="num highlight">₺ ${fmtNum(h.support_amount_try)}</td>
+                    <td style="text-align:center;"><button onclick="deleteHistoryEntry(${h.id})" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:0.75rem;" title="Delete">✕</button></td>
                 </tr>`;
             }).join('');
 
@@ -294,16 +306,14 @@
                         <h2>Analysis History</h2>
                         <span class="badge">${history.length} record${history.length > 1 ? 's' : ''}</span>
                     </div>
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="history-btn btn-export-history" onclick="exportHistoryExcel()">Export Excel</button>
-                        <button class="history-btn btn-clear-history" onclick="clearHistory()">Clear History</button>
-                    </div>
+                    <button class="history-btn btn-export-history" onclick="exportHistoryExcel()">Export Excel</button>
                 </div>
                 <div style="overflow-x: auto;">
                     <table class="history-table">
                         <thead>
                             <tr>
                                 <th>Date</th>
+                                <th>User</th>
                                 <th>Company</th>
                                 <th>Country</th>
                                 <th>Period</th>
@@ -312,6 +322,7 @@
                                 <th class="num">Eligible</th>
                                 <th class="num">Support</th>
                                 <th class="num">Support (TRY)</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
@@ -319,13 +330,6 @@
                 </div>
             `;
         }
-
-        // Listen for analysis results from fulfillment iframe
-        window.addEventListener('message', function(e) {
-            if (e.data && e.data.type === 'fundmate-analysis') {
-                saveToHistory(e.data.data);
-            }
-        });
 
         window.addEventListener('DOMContentLoaded', init);
     </script>
@@ -361,13 +365,13 @@
 
             <!-- Tabs -->
             <div class="max-w-screen-2xl mx-auto px-6 flex gap-1 border-t border-white/10">
-                <button id="btn-grants" onclick="switchTab('grants')" class="tab-btn active border-purple-500 text-purple-400 px-6 py-3 font-medium border-b-2 transition">
+                <button id="btn-grants" onclick="switchTab('grants')" class="tab-btn active border-purple-400 text-white bg-white/10 px-6 py-3 font-medium border-b-2 transition">
                     Ads Grant Calculator
                 </button>
-                <button id="btn-fulfillment" onclick="switchTab('fulfillment')" class="tab-btn px-6 py-3 text-white/70 hover:text-white font-medium border-b-2 border-transparent transition">
+                <button id="btn-fulfillment" onclick="switchTab('fulfillment')" class="tab-btn px-6 py-3 text-gray-300 hover:text-white font-medium border-b-2 border-transparent transition">
                     Fulfillment Support
                 </button>
-                <button id="btn-history" onclick="switchTab('history')" class="tab-btn px-6 py-3 text-white/70 hover:text-white font-medium border-b-2 border-transparent transition" style="display: none;">
+                <button id="btn-history" onclick="switchTab('history')" class="tab-btn px-6 py-3 text-gray-300 hover:text-white font-medium border-b-2 border-transparent transition" style="display: none;">
                     History
                 </button>
             </div>

@@ -699,6 +699,52 @@ function findColumn(columns, keywords) {
   return null;
 }
 
+const SSO_API = 'https://apps.iwa.web.tr/api';
+
+function getToken() {
+  return localStorage.getItem('sso_access_token') || '';
+}
+
+async function saveToBackend() {
+  try {
+    const token = getToken();
+    if (!token || !result) return;
+
+    const res = await fetch(`${SSO_API}/fundmate/history`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        company: result.params.company,
+        country: result.params.country,
+        month: result.params.month,
+        year: parseInt(result.params.year),
+        currency: result.params.currency,
+        maxPct: result.params.maxPct,
+        supportPct: result.params.supportPct,
+        rate: result.params.rate,
+        totalSales: result.totalFbaSales,
+        orderFees: result.orderFees.total,
+        refundFees: result.refundFees.total,
+        storageFees: result.storageUsed,
+        totalFees: result.totalFees,
+        eligibleAmount: result.eligibleAmount,
+        supportAmount: result.supportAmount,
+        supportAmountTRY: result.supportAmountTRY
+      })
+    });
+
+    if (res.ok) {
+      log('✓ Analysis saved to history', 'success');
+    }
+  } catch (e) {
+    // Silent fail - don't block the user
+    console.warn('Failed to save history:', e);
+  }
+}
+
 function handleFile(key, input) {
   const file = input.files[0];
   if (!file) return;
@@ -971,31 +1017,8 @@ function processData() {
     
     log('✅ Calculation complete', 'success');
 
-    // Send summary to parent for history tracking
-    if (window.parent !== window) {
-      window.parent.postMessage({
-        type: 'fundmate-analysis',
-        data: {
-          company: result.params.company,
-          month: result.params.month,
-          year: result.params.year,
-          country: result.params.country,
-          currency: result.params.currency,
-          orderFees: result.orderFees.total,
-          refundFees: result.refundFees.total,
-          storageFees: result.storageUsed,
-          totalFees: result.totalFees,
-          totalSales: result.totalFbaSales,
-          eligibleAmount: result.eligibleAmount,
-          supportAmount: result.supportAmount,
-          supportAmountTRY: result.supportAmountTRY,
-          rate: result.params.rate,
-          maxPct: result.params.maxPct,
-          supportPct: result.params.supportPct,
-          timestamp: new Date().toISOString()
-        }
-      }, '*');
-    }
+    // Save to backend via API
+    saveToBackend();
 
   } catch (err) {
     log('❌ Error: ' + err.message, 'error');
