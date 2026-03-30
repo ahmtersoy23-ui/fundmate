@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Fulfillment Support</title>
+  <script>
+    // Iframe guard - prevent direct access
+    if (window.self === window.top) {
+      window.location.href = '/';
+    }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+      --bg-primary: #0a0a0b;
+      --bg-secondary: #141416;
+      --bg-tertiary: #1c1c1f;
+      --border: #2a2a2e;
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #8b5cf6;
+      --accent-hover: #a78bfa;
+      --success: #22c55e;
+      --error: #ef4444;
+      --blue: #3b82f6;
+    }
+    
+    body {
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    
+    .app {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    
+    .header {
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+    
+    .header p {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    .main-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 2rem;
+    }
+    
+    @media (max-width: 1024px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+    
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+    
+    .upload-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    
+    .upload-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: var(--bg-tertiary);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+    
+    .upload-item:hover {
+      border-color: var(--accent);
+      background: rgba(139, 92, 246, 0.05);
+    }
+    
+    .upload-item.has-file {
+      border-style: solid;
+      border-color: var(--success);
+      background: rgba(34, 197, 94, 0.05);
+    }
+    
+    .upload-item input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    
+    .upload-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    
+    .upload-icon.required { background: rgba(139, 92, 246, 0.2); color: var(--accent); }
+    .upload-icon.optional { background: rgba(59, 130, 246, 0.2); color: var(--blue); }
+    
+    .upload-info { flex: 1; min-width: 0; }
+    .upload-name { font-size: 0.8125rem; font-weight: 500; }
+    .upload-desc { font-size: 0.6875rem; color: var(--text-muted); }
+    .upload-file { 
+      font-size: 0.625rem; 
+      color: var(--success); 
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+    }
+    
+    .form-group.full { grid-column: 1 / -1; }
+    
+    .form-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    
+    .form-input {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      color: var(--text-primary);
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    
+    .form-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      font-family: inherit;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      width: 100%;
+    }
+    
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+    
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--border);
+    }
+    
+    .content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    
+    .log-container {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    
+    .log-line { padding: 0.125rem 0; color: var(--text-muted); }
+    .log-line.success { color: var(--success); }
+    .log-line.error { color: var(--error); }
+    .log-line.warn { color: var(--accent); }
+    
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+    }
+    
+    @media (max-width: 1100px) {
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    
+    .summary-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    
+    .summary-card.total {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05));
+      border-color: rgba(139, 92, 246, 0.3);
+    }
+    
+    .summary-header {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+    }
+    
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.25rem 0;
+      font-size: 0.75rem;
+    }
+    
+    .summary-label { color: var(--text-secondary); }
+    .summary-value { 
+      font-family: 'JetBrains Mono', monospace; 
+      font-weight: 500;
+      font-size: 0.7rem;
+    }
+    .summary-value.positive { color: var(--success); }
+    .summary-value.negative { color: var(--error); }
+    .summary-value.highlight { color: var(--accent); }
+    
+    .table-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .table-title {
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+    
+    .table-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    
+    .table-tab {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      white-space: nowrap;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+    }
+    
+    .table-tab:hover { color: var(--text-secondary); }
+    .table-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    
+    .table-content { overflow-x: auto; }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+    
+    th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      background: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    
+    th.num { text-align: right; }
+    
+    td {
+      padding: 0.625rem 1rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    
+    td.num {
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+    }
+    
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    
+    .cell-asin, .cell-sku {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+    
+    tfoot td {
+      background: var(--bg-tertiary);
+      font-weight: 600;
+    }
+    
+    .table-footer {
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+    }
+    
+    .summary-table {
+      width: 100%;
+      font-size: 0.8125rem;
+    }
+    
+    .summary-table td {
+      padding: 0.75rem 1rem;
+    }
+    
+    .summary-table td:first-child {
+      font-weight: 500;
+    }
+    
+    .summary-table td:last-child {
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    
+    .summary-table tr.divider td {
+      border-top: 2px solid var(--border);
+    }
+    
+    .summary-table tr.total td {
+      background: var(--bg-tertiary);
+      font-weight: 600;
+    }
+    
+    .summary-table tr.highlight td {
+      background: rgba(139, 92, 246, 0.1);
+      color: var(--accent);
+    }
+    
+    .summary-table tr.final td {
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--success);
+      font-weight: 600;
+    }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>Amazon Fulfillment Support</h1>
+      <p>Government incentive calculation tool for FBA fees</p>
+    </header>
+    
+    <div class="main-grid">
+      <aside class="sidebar">
+        <div class="card">
+          <div class="card-title">Files</div>
+          <div class="upload-list">
+            <div class="upload-item" id="box-approved">
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" onchange="handleFile('approved', this)">
+              <div class="upload-icon required">1</div>
+              <div class="upload-info">
+                <div class="upload-name">Approved Product List</div>
+                <div class="upload-desc">Approved ASINs</div>
+                <div class="upload-file" id="file-approved"></div>
+              </div>
+            </div>
+            
+            <div class="upload-item" id="box-listings">
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" onchange="handleFile('listings', this)">
+              <div class="upload-icon required">2</div>
+              <div class="upload-info">
+                <div class="upload-name">All Listing Report</div>
+                <div class="upload-desc">ASIN → SKU mapping</div>
+                <div class="upload-file" id="file-listings"></div>
+              </div>
+            </div>
+            
+            <div class="upload-item" id="box-repository">
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" onchange="handleFile('repository', this)">
+              <div class="upload-icon required">3</div>
+              <div class="upload-info">
+                <div class="upload-name">Reports Repository</div>
+                <div class="upload-desc">Orders, Refunds, Storage fees</div>
+                <div class="upload-file" id="file-repository"></div>
+              </div>
+            </div>
+            
+            <div class="upload-item" id="box-storage">
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" onchange="handleFile('storage', this)">
+              <div class="upload-icon optional">4</div>
+              <div class="upload-info">
+                <div class="upload-name">Monthly Storage Fees</div>
+                <div class="upload-desc">ASIN storage fees</div>
+                <div class="upload-file" id="file-storage"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-title">Parameters</div>
+          <div class="form-grid">
+            <div class="form-group full">
+              <label class="form-label">Company Name</label>
+              <input type="text" class="form-input" id="input-company" placeholder="e.g. Acme Trading Ltd.">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Month</label>
+              <select class="form-input" id="input-month">
+                <option value="January">January</option>
+                <option value="February">February</option>
+                <option value="March">March</option>
+                <option value="April">April</option>
+                <option value="May">May</option>
+                <option value="June">June</option>
+                <option value="July">July</option>
+                <option value="August">August</option>
+                <option value="September">September</option>
+                <option value="October">October</option>
+                <option value="November">November</option>
+                <option value="December">December</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Year</label>
+              <input type="number" class="form-input" id="input-year" value="2025" min="2020" max="2030">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Country</label>
+              <select class="form-input" id="input-country">
+                <option value="US">US - United States</option>
+                <option value="UK">UK - United Kingdom</option>
+                <option value="DE" selected>DE - Germany</option>
+                <option value="FR">FR - France</option>
+                <option value="IT">IT - Italy</option>
+                <option value="ES">ES - Spain</option>
+                <option value="CA">CA - Canada</option>
+                <option value="AU">AU - Australia</option>
+                <option value="AE">AE - UAE</option>
+                <option value="SA">SA - Saudi Arabia</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Currency</label>
+              <select class="form-input" id="input-currency">
+                <option value="$">$ (USD)</option>
+                <option value="€" selected>€ (EUR)</option>
+                <option value="£">£ (GBP)</option>
+                <option value="C$">C$ (CAD)</option>
+                <option value="A$">A$ (AUD)</option>
+                <option value="د.إ">د.إ (AED)</option>
+                <option value="﷼">﷼ (SAR)</option>
+                <option value="₺">₺ (TRY)</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Max FBA %</label>
+              <input type="number" class="form-input" id="input-max-pct" value="20" min="0" max="100" step="1">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Support %</label>
+              <input type="number" class="form-input" id="input-support-pct" value="50" min="0" max="100" step="1">
+            </div>
+            
+            <div class="form-group full">
+              <label class="form-label">Exchange Rate (1 Foreign = ? ₺)</label>
+              <input type="number" class="form-input" id="input-rate" value="36.50" min="0" step="0.01">
+            </div>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn btn-primary" id="btn-process" onclick="processData()" disabled style="flex: 1;">
+            Calculate
+          </button>
+          <button class="btn btn-secondary" id="btn-reset" onclick="resetData()" style="flex-shrink: 0; width: auto; padding: 0.75rem 1rem;">
+            Reset
+          </button>
+        </div>
+      </aside>
+      
+      <main class="content">
+        <div class="log-container" id="log-box">
+          <div class="log-line">Upload files and enter parameters</div>
+        </div>
+        
+        <div id="results" class="hidden">
+          <div class="summary-grid" id="summary-cards"></div>
+          
+          <div class="table-section">
+            <div class="table-header">
+              <div class="table-title">Detailed Data</div>
+              <button class="btn btn-secondary" onclick="downloadExcel()">
+                Download Excel
+              </button>
+            </div>
+            
+            <div class="table-tabs">
+              <button class="table-tab active" onclick="showTab('orderFees')">Order FBA Fees</button>
+              <button class="table-tab" onclick="showTab('refundFees')">Refund FBA Fees</button>
+              <button class="table-tab" onclick="showTab('monthlyStorage')">Monthly Storage</button>
+              <button class="table-tab" onclick="showTab('inventory')">Inventory & Sales</button>
+              <button class="table-tab" onclick="showTab('summary')">Summary</button>
+            </div>
+            
+            <div class="table-content" id="table-content"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+<script>
+const files = { approved: null, listings: null, repository: null, storage: null };
+const parsedData = {};
+let result = null;
+let currentTab = 'orderFees';
+
+function toNumber(x) {
+  if (x === null || x === undefined || x === '') return 0;
+  if (typeof x === 'number') return x;
+  let s = String(x).trim();
+  if (s === '') return 0;
+  if (s.startsWith('(') && s.endsWith(')')) s = '-' + s.slice(1, -1);
+  s = s.replace(/[^\d,.\-]/g, '');
+  const commas = (s.match(/,/g) || []).length;
+  const dots = (s.match(/\./g) || []).length;
+  if (commas > 0 && dots === 0) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (dots > 0 && commas === 0) {
+    s = s.replace(/,/g, '');
+  } else if (commas > 0 && dots > 0) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+  }
+  const num = parseFloat(s);
+  return isNaN(num) ? 0 : num;
+}
+
+function formatNum(n) {
+  if (n === 0 || n === null || n === undefined) return '-';
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getCurrency() {
+  return document.getElementById('input-currency').value;
+}
+
+const COUNTRY_CURRENCY_MAP = {
+  US: '$', UK: '£', DE: '€', FR: '€', IT: '€', ES: '€',
+  CA: 'C$', AU: 'A$', AE: 'د.إ', SA: '﷼'
+};
+
+document.getElementById('input-country').addEventListener('change', function() {
+  const curr = COUNTRY_CURRENCY_MAP[this.value];
+  if (curr) document.getElementById('input-currency').value = curr;
+});
+
+function log(msg, type = '') {
+  const box = document.getElementById('log-box');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.textContent = msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-box').innerHTML = '';
+}
+
+function findColumn(columns, keywords) {
+  const colsLower = columns.map(c => c.toLowerCase().trim());
+  for (const kw of keywords) {
+    const kwLower = kw.toLowerCase().trim();
+    for (let i = 0; i < colsLower.length; i++) {
+      if (colsLower[i] === kwLower || colsLower[i].includes(kwLower)) {
+        return columns[i];
+      }
+    }
+  }
+  return null;
+}
+
+function handleFile(key, input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  files[key] = file;
+  document.getElementById('file-' + key).textContent = '✓ ' + file.name;
+  document.getElementById('box-' + key).classList.add('has-file');
+  
+  const ext = file.name.split('.').pop().toLowerCase();
+  
+  if (ext === 'xlsx' || ext === 'xls') {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      parsedData[key] = normalizeData(data);
+      updateButtonState();
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    // For TXT/CSV - handle Reports Repository specially
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let text = e.target.result;
+      
+      // For Reports Repository, find the header row
+      if (key === 'repository') {
+        const lines = text.split('\n');
+        let headerIndex = 0;
+        for (let i = 0; i < lines.length; i++) {
+          const lower = lines[i].toLowerCase();
+          if (lower.includes('date/time') || lower.includes('datetime') || 
+              (lower.includes('type') && lower.includes('sku'))) {
+            headerIndex = i;
+            break;
+          }
+        }
+        text = lines.slice(headerIndex).join('\n');
+      }
+      
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          parsedData[key] = normalizeData(results.data);
+          updateButtonState();
+        }
+      });
+    };
+    reader.readAsText(file);
+  }
+}
+
+function normalizeData(data) {
+  return data.map(row => {
+    const newRow = {};
+    Object.keys(row).forEach(k => {
+      newRow[k.toLowerCase().trim().replace(/^\ufeff/, '').replace(/['"]/g, '')] = row[k];
+    });
+    return newRow;
+  });
+}
+
+function updateButtonState() {
+  const hasApproved = parsedData.approved?.length > 0;
+  const hasListings = parsedData.listings?.length > 0;
+  const hasRepository = parsedData.repository?.length > 0;
+  document.getElementById('btn-process').disabled = !(hasApproved && hasListings && hasRepository);
+}
+
+function processData() {
+  clearLog();
+  result = null;
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    // 1. Get approved ASINs
+    const approvedData = parsedData.approved || [];
+    if (approvedData.length === 0) {
+      log('❌ Approved Product List is empty', 'error');
+      return;
+    }
+
+    const approvedCols = Object.keys(approvedData[0] || {});
+    const asinCol = findColumn(approvedCols, ['asin', 'asin1']);
+    
+    if (!asinCol) {
+      log('❌ ASIN column not found in Approved list', 'error');
+      return;
+    }
+
+    const approvedAsins = new Set();
+    approvedData.forEach(row => {
+      const asin = String(row[asinCol] || '').trim().toUpperCase();
+      if (asin) approvedAsins.add(asin);
+    });
+    log(`✓ Approved list: ${approvedAsins.size} ASINs`, 'success');
+
+    // 2. Build ASIN → SKU mapping from All Listing Report
+    const listingsData = parsedData.listings || [];
+    const listingsCols = Object.keys(listingsData[0] || {});
+    const listingAsinCol = findColumn(listingsCols, ['asin1', 'asin']);
+    const listingSkuCol = findColumn(listingsCols, ['seller-sku', 'seller_sku', 'sku']);
+
+    if (!listingAsinCol || !listingSkuCol) {
+      log('❌ ASIN or SKU column not found in Listings', 'error');
+      return;
+    }
+
+    const asinToSkus = {};  // ASIN -> Set of SKUs
+    const skuToAsin = {};   // SKU -> ASIN
+    const approvedSkus = new Set();
+
+    listingsData.forEach(row => {
+      const asin = String(row[listingAsinCol] || '').trim().toUpperCase();
+      const sku = String(row[listingSkuCol] || '').trim();
+      
+      if (asin && sku) {
+        if (!asinToSkus[asin]) asinToSkus[asin] = new Set();
+        asinToSkus[asin].add(sku);
+        skuToAsin[sku] = asin;
+        
+        if (approvedAsins.has(asin)) {
+          approvedSkus.add(sku);
+        }
+      }
+    });
+    log(`✓ Listings: ${Object.keys(skuToAsin).length} SKUs mapped, ${approvedSkus.size} approved`, 'success');
+
+    // 3. Process Reports Repository
+    const repoData = parsedData.repository || [];
+    const repoCols = Object.keys(repoData[0] || {});
+    
+    const repoTypeCol = findColumn(repoCols, ['type']);
+    const repoSkuCol = findColumn(repoCols, ['sku']);
+    const repoDescCol = findColumn(repoCols, ['description']);
+    const repoFbaFeesCol = findColumn(repoCols, ['fba fees', 'fba-fees']);
+    const repoTotalCol = findColumn(repoCols, ['total']);
+    const repoProductSalesCol = findColumn(repoCols, ['product sales', 'product-sales']);
+    const repoFulfillmentCol = findColumn(repoCols, ['fulfillment']);
+
+    if (!repoSkuCol) {
+      log('❌ SKU column not found in Reports Repository', 'error');
+      return;
+    }
+
+    // Initialize result
+    result = {
+      orderFees: { data: [], total: 0 },
+      refundFees: { data: [], total: 0 },
+      monthlyStorage: { data: [], total: 0 },
+      inventoryStorage: 0,
+      totalFbaSales: 0,
+      params: getParams()
+    };
+
+    // Process Order FBA Fees (type = "Order" and fulfillment = "Amazon")
+    const orderFeesGrouped = {};
+
+    repoData.forEach(row => {
+      const type = String(row[repoTypeCol] || '').trim().toLowerCase();
+      const sku = String(row[repoSkuCol] || '').trim();
+      const fulfillment = String(row[repoFulfillmentCol] || '').trim().toLowerCase();
+      const fbaFees = toNumber(row[repoFbaFeesCol]);
+
+      if (type === 'order' && fulfillment === 'amazon' && approvedSkus.has(sku) && fbaFees !== 0) {
+        if (!orderFeesGrouped[sku]) orderFeesGrouped[sku] = 0;
+        orderFeesGrouped[sku] += fbaFees;
+      }
+    });
+
+    Object.entries(orderFeesGrouped).forEach(([sku, fees]) => {
+      const asin = skuToAsin[sku] || '';
+      const positiveFees = Math.abs(fees);
+      result.orderFees.data.push({ sku, asin, fees: positiveFees });
+      result.orderFees.total += positiveFees;
+    });
+    log(`✓ Order FBA Fees: ${result.orderFees.data.length} SKUs, total ${formatNum(result.orderFees.total)}`, 'success');
+
+    // Process Refund FBA Fees (description = "FBA Customer Return Per Unit Fee")
+    const refundFeesGrouped = {};
+    
+    repoData.forEach(row => {
+      const desc = String(row[repoDescCol] || '').trim().toLowerCase();
+      const sku = String(row[repoSkuCol] || '').trim();
+      const fbaFees = toNumber(row[repoFbaFeesCol]);
+      
+      if (desc.includes('fba customer return per unit fee') && approvedSkus.has(sku) && fbaFees !== 0) {
+        if (!refundFeesGrouped[sku]) refundFeesGrouped[sku] = 0;
+        refundFeesGrouped[sku] += fbaFees;
+      }
+    });
+
+    Object.entries(refundFeesGrouped).forEach(([sku, fees]) => {
+      const asin = skuToAsin[sku] || '';
+      const positiveFees = Math.abs(fees);
+      result.refundFees.data.push({ sku, asin, fees: positiveFees });
+      result.refundFees.total += positiveFees;
+    });
+    log(`✓ Refund FBA Fees: ${result.refundFees.data.length} SKUs, total ${formatNum(result.refundFees.total)}`, 'success');
+
+    // Process FBA Inventory Fee from Reports Repository (type = "FBA Inventory Fee" AND description = "FBA storage fee")
+    repoData.forEach(row => {
+      const type = String(row[repoTypeCol] || '').trim().toLowerCase();
+      const desc = String(row[repoDescCol] || '').trim().toLowerCase();
+      const total = toNumber(row[repoTotalCol]);
+      
+      // Check for storage fee keywords in multiple languages, exclude long-term storage
+      const hasStorageKeyword = desc.includes('storage') || desc.includes('lager') ||
+                                desc.includes('stockage') || desc.includes('stoccaggio') ||
+                                desc.includes('almacenamiento');
+      const isLongTerm = desc.includes('long-term') || desc.includes('long term') ||
+                         desc.includes('langzeit') || desc.includes('lungo termine') ||
+                         desc.includes('long terme') || desc.includes('largo plazo');
+      if (type === 'fba inventory fee' && hasStorageKeyword && !isLongTerm) {
+        result.inventoryStorage += Math.abs(total);
+      }
+    });
+    log(`✓ FBA Inventory Fee: ${formatNum(result.inventoryStorage)}`, 'success');
+
+    // Process Total FBA Sales (product sales for approved SKUs - only Order type and Amazon fulfillment)
+    repoData.forEach(row => {
+      const type = String(row[repoTypeCol] || '').trim().toLowerCase();
+      const sku = String(row[repoSkuCol] || '').trim();
+      const fulfillment = String(row[repoFulfillmentCol] || '').trim().toLowerCase();
+      const productSales = toNumber(row[repoProductSalesCol]);
+
+      if (type === 'order' && fulfillment === 'amazon' && approvedSkus.has(sku) && productSales !== 0) {
+        result.totalFbaSales += productSales;
+      }
+    });
+    log(`✓ Total FBA Sales: ${formatNum(result.totalFbaSales)}`, 'success');
+
+    // 4. Process Monthly Storage Fees (if provided)
+    if (parsedData.storage?.length > 0) {
+      const storageCols = Object.keys(parsedData.storage[0] || {});
+      const storageAsinCol = findColumn(storageCols, ['asin']);
+      const storageFeesCol = findColumn(storageCols, ['estimated_monthly_storage_fee', 'estimated-monthly-storage-fee', 'monthly_storage_fee', 'storage_fee']);
+
+      if (storageAsinCol && storageFeesCol) {
+        const storageGrouped = {};
+        
+        parsedData.storage.forEach(row => {
+          const asin = String(row[storageAsinCol] || '').trim().toUpperCase();
+          const fee = toNumber(row[storageFeesCol]);
+          
+          if (approvedAsins.has(asin) && fee !== 0) {
+            if (!storageGrouped[asin]) storageGrouped[asin] = 0;
+            storageGrouped[asin] += fee;
+          }
+        });
+
+        Object.entries(storageGrouped).forEach(([asin, fee]) => {
+          result.monthlyStorage.data.push({ asin, fee });
+          result.monthlyStorage.total += fee;
+        });
+        log(`✓ Monthly Storage Fees: ${result.monthlyStorage.data.length} ASINs, total ${formatNum(result.monthlyStorage.total)}`, 'success');
+      } else {
+        log('⚠ Monthly Storage Fees: Required columns not found', 'warn');
+      }
+    }
+
+    // Calculate summary
+    calculateSummary();
+    
+    document.getElementById('results').classList.remove('hidden');
+    renderSummaryCards();
+    showTab('orderFees');
+    
+    log('✅ Calculation complete', 'success');
+
+    // Send summary to parent for history tracking
+    if (window.parent !== window) {
+      window.parent.postMessage({
+        type: 'fundmate-analysis',
+        data: {
+          company: result.params.company,
+          month: result.params.month,
+          year: result.params.year,
+          country: result.params.country,
+          currency: result.params.currency,
+          orderFees: result.orderFees.total,
+          refundFees: result.refundFees.total,
+          storageFees: result.storageUsed,
+          totalFees: result.totalFees,
+          totalSales: result.totalFbaSales,
+          eligibleAmount: result.eligibleAmount,
+          supportAmount: result.supportAmount,
+          supportAmountTRY: result.supportAmountTRY,
+          rate: result.params.rate,
+          maxPct: result.params.maxPct,
+          supportPct: result.params.supportPct,
+          timestamp: new Date().toISOString()
+        }
+      }, '*');
+    }
+
+  } catch (err) {
+    log('❌ Error: ' + err.message, 'error');
+    console.error(err);
+  }
+}
+
+function getParams() {
+  return {
+    company: document.getElementById('input-company').value || '-',
+    month: document.getElementById('input-month').value,
+    year: document.getElementById('input-year').value,
+    country: document.getElementById('input-country').value || '-',
+    currency: document.getElementById('input-currency').value,
+    maxPct: parseFloat(document.getElementById('input-max-pct').value) || 20,
+    supportPct: parseFloat(document.getElementById('input-support-pct').value) || 50,
+    rate: parseFloat(document.getElementById('input-rate').value) || 1
+  };
+}
+
+function resetData() {
+  // Clear parsed data and files
+  Object.keys(files).forEach(k => files[k] = null);
+  Object.keys(parsedData).forEach(k => delete parsedData[k]);
+  result = null;
+
+  // Reset file inputs and labels
+  document.querySelectorAll('.upload-item input[type="file"]').forEach(input => input.value = '');
+  document.querySelectorAll('.upload-file').forEach(el => el.textContent = '');
+  document.querySelectorAll('.upload-item').forEach(el => el.classList.remove('has-file'));
+
+  // Hide results
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('table-content').innerHTML = '';
+  document.getElementById('summary-cards').innerHTML = '';
+
+  // Reset button state
+  document.getElementById('btn-process').disabled = true;
+
+  clearLog();
+  log('Reset complete. Upload new files to start.', 'success');
+}
+
+function calculateSummary() {
+  const p = result.params;
+  
+  // Storage: use the lower of Monthly Storage or Inventory Storage
+  // If only one has value, use that one
+  const monthly = result.monthlyStorage.total;
+  const inventory = result.inventoryStorage;
+  
+  if (monthly > 0 && inventory > 0) {
+    // Both have values - use lower
+    result.storageUsed = Math.min(monthly, inventory);
+    result.storageSource = monthly <= inventory ? 'monthly' : 'inventory';
+  } else if (monthly > 0) {
+    // Only monthly has value
+    result.storageUsed = monthly;
+    result.storageSource = 'monthly';
+  } else {
+    // Only inventory has value (or both are 0)
+    result.storageUsed = inventory;
+    result.storageSource = 'inventory';
+  }
+  
+  // Total FBA Fees (using only the selected storage value)
+  result.totalFees = result.orderFees.total + result.refundFees.total + result.storageUsed;
+  
+  // Upper Limit based on FBA Sales
+  result.upperLimit = result.totalFbaSales * (p.maxPct / 100);
+  
+  // Eligible Amount = MIN(totalFees, upperLimit)
+  result.eligibleAmount = Math.min(result.totalFees, result.upperLimit);
+  
+  // Support Amount
+  result.supportAmount = result.eligibleAmount * (p.supportPct / 100);
+  result.supportAmountTRY = result.supportAmount * p.rate;
+}
+
+function renderSummaryCards() {
+  const container = document.getElementById('summary-cards');
+  const currency = getCurrency();
+  
+  const storageLabel = result.storageSource === 'monthly' ? 'Monthly Storage' : 'Inventory Fee';
+  
+  container.innerHTML = `
+    <div class="summary-card">
+      <div class="summary-header">Order FBA Fees</div>
+      <div class="summary-row">
+        <span class="summary-label">Total</span>
+        <span class="summary-value negative">${currency} ${formatNum(result.orderFees.total)}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">SKUs</span>
+        <span class="summary-value">${result.orderFees.data.length}</span>
+      </div>
+    </div>
+    
+    <div class="summary-card">
+      <div class="summary-header">Refund FBA Fees</div>
+      <div class="summary-row">
+        <span class="summary-label">Total</span>
+        <span class="summary-value negative">${currency} ${formatNum(result.refundFees.total)}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">SKUs</span>
+        <span class="summary-value">${result.refundFees.data.length}</span>
+      </div>
+    </div>
+    
+    <div class="summary-card">
+      <div class="summary-header">Storage Fee</div>
+      <div class="summary-row">
+        <span class="summary-label">${storageLabel}</span>
+        <span class="summary-value negative">${currency} ${formatNum(result.storageUsed)}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Source</span>
+        <span class="summary-value" style="font-size: 0.65rem;">${result.storageSource === 'monthly' ? 'Monthly Report' : 'Repository'}</span>
+      </div>
+    </div>
+    
+    <div class="summary-card total">
+      <div class="summary-header">Total Support</div>
+      <div class="summary-row">
+        <span class="summary-label">Eligible</span>
+        <span class="summary-value">${currency} ${formatNum(result.eligibleAmount)}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Support</span>
+        <span class="summary-value highlight">${currency} ${formatNum(result.supportAmount)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function showTab(tab) {
+  currentTab = tab;
+  
+  document.querySelectorAll('.table-tab').forEach((btn, i) => {
+    const tabs = ['orderFees', 'refundFees', 'monthlyStorage', 'inventory', 'summary'];
+    btn.classList.toggle('active', tabs[i] === tab);
+  });
+  
+  if (tab === 'orderFees') {
+    renderSkuTable(result.orderFees.data, result.orderFees.total, 'FBA Fees');
+  } else if (tab === 'refundFees') {
+    renderSkuTable(result.refundFees.data, result.refundFees.total, 'FBA Fees');
+  } else if (tab === 'monthlyStorage') {
+    renderStorageTable();
+  } else if (tab === 'inventory') {
+    renderInventoryTable();
+  } else if (tab === 'summary') {
+    renderSummaryTable();
+  }
+}
+
+function renderSkuTable(data, total, feeLabel) {
+  const content = document.getElementById('table-content');
+  const currency = getCurrency();
+
+  content.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>ASIN</th>
+          <th class="num">${feeLabel} (${currency})</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.length === 0 ? `<tr><td colspan="3" style="text-align: center; color: var(--text-muted);">No data</td></tr>` : ''}
+        ${data.slice(0, 100).map(row => `
+          <tr>
+            <td class="cell-sku">${row.sku}</td>
+            <td class="cell-asin">${row.asin}</td>
+            <td class="num">${formatNum(row.fees)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>TOTAL</strong></td>
+          <td></td>
+          <td class="num">${formatNum(total)}</td>
+        </tr>
+      </tfoot>
+    </table>
+    ${data.length > 100 ? `<div class="table-footer">Showing first 100 rows. Download Excel for complete data.</div>` : ''}
+  `;
+}
+
+function renderStorageTable() {
+  const content = document.getElementById('table-content');
+  const currency = getCurrency();
+  const data = result.monthlyStorage.data;
+  
+  content.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>ASIN</th>
+          <th class="num">Storage Fee (${currency})</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.length === 0 ? `<tr><td colspan="2" style="text-align: center; color: var(--text-muted);">No data</td></tr>` : ''}
+        ${data.slice(0, 100).map(row => `
+          <tr>
+            <td class="cell-asin">${row.asin}</td>
+            <td class="num">${formatNum(row.fee)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>TOTAL</strong></td>
+          <td class="num">${formatNum(result.monthlyStorage.total)}</td>
+        </tr>
+      </tfoot>
+    </table>
+    ${data.length > 100 ? `<div class="table-footer">Showing first 100 rows. Download Excel for complete data.</div>` : ''}
+  `;
+}
+
+function renderInventoryTable() {
+  const content = document.getElementById('table-content');
+  const currency = getCurrency();
+  
+  content.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="num">Amount (${currency})</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>FBA Inventory Fee</td>
+          <td class="num">${formatNum(result.inventoryStorage)}</td>
+        </tr>
+        <tr>
+          <td>Total FBA Sales</td>
+          <td class="num">${formatNum(result.totalFbaSales)}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+}
+
+function renderSummaryTable() {
+  const content = document.getElementById('table-content');
+  const p = result.params;
+  const currency = p.currency;
+
+  const storageLabel = result.storageSource === 'monthly' ? 'Monthly Storage Fees' : 'FBA Inventory Fee';
+  const fbaFeePercent = result.totalFbaSales > 0 ? (result.totalFees / result.totalFbaSales) * 100 : 0;
+
+  // Determine which value is used for eligible (fees or upper limit)
+  const isFeesLimited = result.totalFees <= result.upperLimit;
+  const feesColor = 'var(--error)';
+  const upperLimitColor = 'var(--blue)';
+  const eligibleColor = isFeesLimited ? feesColor : upperLimitColor;
+
+  content.innerHTML = `
+    <table class="summary-table">
+      <tbody>
+        <tr>
+          <td>Order FBA Fees</td>
+          <td>${currency} ${formatNum(result.orderFees.total)}</td>
+        </tr>
+        <tr>
+          <td>Refund FBA Fees</td>
+          <td>${currency} ${formatNum(result.refundFees.total)}</td>
+        </tr>
+        <tr>
+          <td>${storageLabel}</td>
+          <td>${currency} ${formatNum(result.storageUsed)}</td>
+        </tr>
+        <tr class="total divider">
+          <td>Total FBA Fees</td>
+          <td style="color: ${feesColor};">${currency} ${formatNum(result.totalFees)}</td>
+        </tr>
+        <tr>
+          <td>Total FBA Sales</td>
+          <td>${currency} ${formatNum(result.totalFbaSales)}</td>
+        </tr>
+        <tr>
+          <td>FBA Fee %</td>
+          <td style="color: ${fbaFeePercent > 20 ? 'var(--error)' : fbaFeePercent > 15 ? 'var(--accent)' : 'var(--success)'};">${fbaFeePercent.toFixed(2)}%</td>
+        </tr>
+        <tr>
+          <td>Upper Limit (${p.maxPct}%)</td>
+          <td style="color: ${upperLimitColor};">${currency} ${formatNum(result.upperLimit)}</td>
+        </tr>
+        <tr class="highlight">
+          <td>Eligible Amount</td>
+          <td style="color: ${eligibleColor}; font-weight: 700;">${currency} ${formatNum(result.eligibleAmount)}</td>
+        </tr>
+        <tr>
+          <td>Support Amount (${p.supportPct}%)</td>
+          <td>${currency} ${formatNum(result.supportAmount)}</td>
+        </tr>
+        <tr>
+          <td>Exchange Rate</td>
+          <td>${formatNum(p.rate)}</td>
+        </tr>
+        <tr class="final">
+          <td>Support (₺)</td>
+          <td>₺ ${formatNum(result.supportAmountTRY)}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+}
+
+function downloadExcel() {
+  if (!result) return;
+  
+  const p = result.params;
+  const wb = XLSX.utils.book_new();
+  
+  // 1. Order FBA Fees
+  const orderData = [['SKU', 'ASIN', `FBA Fees (${p.currency})`]];
+  result.orderFees.data.forEach(r => orderData.push([r.sku, r.asin, r.fees]));
+  orderData.push(['TOTAL', '', result.orderFees.total]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderData), 'Order FBA Fees');
+  
+  // 2. Refund FBA Fees
+  const refundData = [['SKU', 'ASIN', `FBA Fees (${p.currency})`]];
+  result.refundFees.data.forEach(r => refundData.push([r.sku, r.asin, r.fees]));
+  refundData.push(['TOTAL', '', result.refundFees.total]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(refundData), 'Refund FBA Fees');
+  
+  // 3. Monthly Storage Fees
+  const storageData = [['ASIN', `Storage Fee (${p.currency})`]];
+  result.monthlyStorage.data.forEach(r => storageData.push([r.asin, r.fee]));
+  storageData.push(['TOTAL', result.monthlyStorage.total]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(storageData), 'Monthly Storage Fees');
+  
+  // 4. Inventory & Sales
+  const inventoryData = [
+    ['Description', `Amount (${p.currency})`],
+    ['FBA Inventory Fee', result.inventoryStorage],
+    ['Monthly Storage Fees', result.monthlyStorage.total],
+    ['Storage Used (Lower)', result.storageUsed],
+    ['', ''],
+    ['Total FBA Sales', result.totalFbaSales]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(inventoryData), 'Inventory & Sales');
+  
+  // 5. Summary
+  const storageLabel = result.storageSource === 'monthly' ? 'Monthly Storage Fees' : 'FBA Inventory Fee';
+  const summaryData = [
+    ['Description', `Amount (${p.currency})`],
+    ['Order FBA Fees', result.orderFees.total],
+    ['Refund FBA Fees', result.refundFees.total],
+    [`${storageLabel} (Used)`, result.storageUsed],
+    ['Total FBA Fees', result.totalFees],
+    ['', ''],
+    ['Total FBA Sales', result.totalFbaSales],
+    [`Upper Limit (${p.maxPct}%)`, result.upperLimit],
+    ['Eligible Amount', result.eligibleAmount],
+    [`Support Amount (${p.supportPct}%)`, result.supportAmount],
+    ['Exchange Rate', p.rate],
+    ['Support (TRY)', result.supportAmountTRY]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
+  
+  const companySlug = p.company !== '-' ? `_${p.company}` : '';
+  const fileName = `Amazon Fulfillment Support${companySlug}_${p.month}_${p.year}_${p.country}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const now = new Date();
+  document.getElementById('input-month').value = months[now.getMonth()];
+  document.getElementById('input-year').value = now.getFullYear();
+});
+</script>
+</body>
+</html>

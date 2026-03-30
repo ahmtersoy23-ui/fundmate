@@ -5,12 +5,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FundMate - Amazon Support Tools</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         iframe { border: none; width: 100%; height: calc(100vh - 120px); }
+
+        /* History table styles */
+        .history-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+        .history-table th {
+            text-align: left;
+            padding: 0.75rem 0.75rem;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #a1a1aa;
+            background: rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            white-space: nowrap;
+        }
+        .history-table th.num { text-align: right; }
+        .history-table td {
+            padding: 0.625rem 0.75rem;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            color: #e4e4e7;
+            white-space: nowrap;
+        }
+        .history-table td.num {
+            text-align: right;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 0.75rem;
+        }
+        .history-table tr:hover td { background: rgba(255,255,255,0.03); }
+        .history-table .highlight { color: #a78bfa; font-weight: 600; }
+        .history-empty {
+            text-align: center;
+            color: #71717a;
+            padding: 4rem 0;
+            font-size: 0.875rem;
+        }
+        .history-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        .history-toolbar h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #fafafa;
+        }
+        .history-toolbar .badge {
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .history-btn {
+            padding: 0.5rem 1rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid;
+        }
+        .btn-clear-history {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+        .btn-clear-history:hover { background: rgba(239, 68, 68, 0.25); }
+        .btn-export-history {
+            background: rgba(34, 197, 94, 0.15);
+            color: #4ade80;
+            border-color: rgba(34, 197, 94, 0.2);
+        }
+        .btn-export-history:hover { background: rgba(34, 197, 94, 0.25); }
     </style>
     <script>
         // Prevent direct access - must be loaded in iframe from SSO portal
@@ -27,6 +114,9 @@
         const SSO_PORTAL_URL = 'https://apps.iwa.web.tr';
         const SSO_VERIFY_URL = 'https://apps.iwa.web.tr/api/auth/verify';
         const APP_CODE = 'fundmate';
+        const HISTORY_KEY = 'fundmate_analysis_history';
+
+        let isAdmin = false;
 
         function getToken() {
             const hash = new URLSearchParams(window.location.hash.substring(1));
@@ -46,13 +136,15 @@
                 if (res.status === 403) {
                         localStorage.removeItem('sso_access_token');
                     top.location.href = SSO_PORTAL_URL;
-                    return false;
+                    return null;
                 }
 
                 const data = await res.json();
-                return data.success;
+                if (!data.success) return null;
+
+                return data.data;
             } catch (e) {
-                return false;
+                return null;
             }
         }
 
@@ -65,9 +157,9 @@
                 return;
             }
 
-            const isValid = await verifyToken(token);
+            const userData = await verifyToken(token);
 
-            if (!isValid) {
+            if (!userData) {
                 localStorage.removeItem('sso_access_token');
                 top.location.href = SSO_PORTAL_URL;
                 return;
@@ -75,6 +167,14 @@
 
             localStorage.setItem('sso_access_token', token);
             window.history.replaceState({}, '', window.location.pathname);
+
+            // Check admin role
+            const role = (userData.role || '').toUpperCase();
+            isAdmin = role === 'ADMIN';
+
+            if (isAdmin) {
+                document.getElementById('btn-history').style.display = '';
+            }
 
             document.getElementById('loading').style.display = 'none';
             document.getElementById('app').style.display = 'block';
@@ -86,12 +186,146 @@
 
             document.getElementById('btn-' + tab).classList.add('active', 'border-purple-500', 'text-purple-400');
             document.getElementById('tab-' + tab).classList.add('active');
+
+            if (tab === 'history') renderHistory();
         }
 
         function logout() {
             localStorage.removeItem('sso_access_token');
             top.location.href = SSO_PORTAL_URL;
         }
+
+        // --- History ---
+        function getHistory() {
+            try {
+                return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+            } catch { return []; }
+        }
+
+        function saveToHistory(entry) {
+            const history = getHistory();
+            history.unshift(entry);
+            // Keep last 200 entries
+            if (history.length > 200) history.length = 200;
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        }
+
+        function clearHistory() {
+            if (!confirm('Tüm analiz geçmişi silinecek. Emin misiniz?')) return;
+            localStorage.removeItem(HISTORY_KEY);
+            renderHistory();
+        }
+
+        function exportHistoryExcel() {
+            const history = getHistory();
+            if (history.length === 0) return;
+
+            const rows = [['Date', 'Company', 'Country', 'Month', 'Year', 'Currency', 'FBA Sales', 'Order Fees', 'Refund Fees', 'Storage Fees', 'Total Fees', 'Max %', 'Support %', 'Rate', 'Eligible Amount', 'Support Amount', 'Support (TRY)']];
+
+            history.forEach(h => {
+                rows.push([
+                    new Date(h.timestamp).toLocaleString('tr-TR'),
+                    h.company || '-',
+                    h.country,
+                    h.month,
+                    h.year,
+                    h.currency,
+                    h.totalSales || 0,
+                    h.orderFees || 0,
+                    h.refundFees || 0,
+                    h.storageFees || 0,
+                    h.totalFees || 0,
+                    h.maxPct || 0,
+                    h.supportPct || 0,
+                    h.rate || 0,
+                    h.eligibleAmount || 0,
+                    h.supportAmount || 0,
+                    h.supportAmountTRY || 0
+                ]);
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+
+            // Column widths
+            ws['!cols'] = [
+                { wch: 18 }, { wch: 24 }, { wch: 8 }, { wch: 10 }, { wch: 6 },
+                { wch: 6 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+                { wch: 14 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 14 },
+                { wch: 14 }, { wch: 14 }
+            ];
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Analysis History');
+            XLSX.writeFile(wb, `FundMate_History_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        function fmtNum(n) {
+            if (n === 0 || n == null) return '-';
+            return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history-content');
+            const history = getHistory();
+
+            if (history.length === 0) {
+                container.innerHTML = '<div class="history-empty">Henüz analiz geçmişi yok.</div>';
+                return;
+            }
+
+            const rows = history.map((h, i) => {
+                const date = new Date(h.timestamp).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                return `<tr>
+                    <td>${date}</td>
+                    <td><strong>${h.company || '-'}</strong></td>
+                    <td>${h.country}</td>
+                    <td>${h.month} ${h.year}</td>
+                    <td class="num">${h.currency} ${fmtNum(h.totalSales)}</td>
+                    <td class="num">${h.currency} ${fmtNum(h.totalFees)}</td>
+                    <td class="num">${h.currency} ${fmtNum(h.eligibleAmount)}</td>
+                    <td class="num highlight">${h.currency} ${fmtNum(h.supportAmount)}</td>
+                    <td class="num highlight">₺ ${fmtNum(h.supportAmountTRY)}</td>
+                </tr>`;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="history-toolbar">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <h2>Analysis History</h2>
+                        <span class="badge">${history.length} record${history.length > 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="history-btn btn-export-history" onclick="exportHistoryExcel()">Export Excel</button>
+                        <button class="history-btn btn-clear-history" onclick="clearHistory()">Clear History</button>
+                    </div>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Company</th>
+                                <th>Country</th>
+                                <th>Period</th>
+                                <th class="num">FBA Sales</th>
+                                <th class="num">Total Fees</th>
+                                <th class="num">Eligible</th>
+                                <th class="num">Support</th>
+                                <th class="num">Support (TRY)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Listen for analysis results from fulfillment iframe
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'fundmate-analysis') {
+                saveToHistory(e.data.data);
+            }
+        });
 
         window.addEventListener('DOMContentLoaded', init);
     </script>
@@ -128,10 +362,13 @@
             <!-- Tabs -->
             <div class="max-w-screen-2xl mx-auto px-6 flex gap-1 border-t border-white/10">
                 <button id="btn-grants" onclick="switchTab('grants')" class="tab-btn active border-purple-500 text-purple-400 px-6 py-3 font-medium border-b-2 transition">
-                    💰 Ads Grant Calculator
+                    Ads Grant Calculator
                 </button>
                 <button id="btn-fulfillment" onclick="switchTab('fulfillment')" class="tab-btn px-6 py-3 text-white/70 hover:text-white font-medium border-b-2 border-transparent transition">
-                    📦 Fulfillment Support
+                    Fulfillment Support
+                </button>
+                <button id="btn-history" onclick="switchTab('history')" class="tab-btn px-6 py-3 text-white/70 hover:text-white font-medium border-b-2 border-transparent transition" style="display: none;">
+                    History
                 </button>
             </div>
         </header>
@@ -142,6 +379,9 @@
         </div>
         <div class="tab-content" id="tab-fulfillment">
             <iframe src="fulfillment-tool.html"></iframe>
+        </div>
+        <div class="tab-content" id="tab-history">
+            <div class="history-container" id="history-content"></div>
         </div>
     </div>
 </body>
